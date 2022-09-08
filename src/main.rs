@@ -1,4 +1,7 @@
+use std::process::id;
+
 use tokio::net::UdpSocket;
+use turbosql::{execute, select, Turbosql};
 
 mod dht_structs;
 use dht_structs::*;
@@ -6,13 +9,29 @@ use dht_structs::*;
 mod dht_id;
 use dht_id::*;
 
+#[derive(Turbosql, Default)]
+struct SelfId {
+	rowid: Option<i64>,
+	ip: Option<String>,
+	id: Option<[u8; 20]>,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
 
 	dbg!(&ip);
 
-	let id = id_from_ip(&ip.parse().unwrap());
+	let id = match select!(Option<SelfId> "WHERE ip = " ip)? {
+		Some(SelfId { id, .. }) => id.unwrap(),
+		None => {
+			let id = id_from_ip(&ip.parse().unwrap());
+			SelfId { rowid: None, ip: Some(ip), id: Some(id) }.insert()?;
+			id
+		}
+	};
+
+	dbg!(String::from_utf8_lossy(&id));
 
 	let enc = PingQuery { id }.into_bytes();
 
