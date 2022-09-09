@@ -1,56 +1,29 @@
-use std::process::id;
+mod dht;
 
-use tokio::net::UdpSocket;
-use turbosql::{execute, select, Turbosql};
-
-mod dht_structs;
-use dht_structs::*;
-
-mod dht_id;
-use dht_id::*;
-
-#[derive(Turbosql, Default)]
-struct SelfId {
-	rowid: Option<i64>,
-	ip: Option<String>,
-	id: Option<[u8; 20]>,
-}
+use log::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-	let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
-
-	dbg!(&ip);
-
-	let id = match select!(Option<SelfId> "WHERE ip = " ip)? {
-		Some(SelfId { id, .. }) => id.unwrap(),
-		None => {
-			let id = id_from_ip(&ip.parse().unwrap());
-			SelfId { rowid: None, ip: Some(ip), id: Some(id) }.insert()?;
-			id
-		}
-	};
-
-	dbg!(String::from_utf8_lossy(&id));
-
-	let enc = PingQuery { id }.into_bytes();
-
-	let send_addr = "dht.transmissionbt.com:6881";
-	// let send_addr = "router.utorrent.com:6881";
-
-	let sock = UdpSocket::bind("0.0.0.0:55874").await?;
-
-	let len = sock.send_to(&enc, send_addr).await?;
-	println!("{:?} bytes sent", len);
-
-	let mut buf = [0; 1500];
-	loop {
-		let (len, addr) = sock.recv_from(&mut buf).await?;
-		println!(
-			"{:?} bytes received from {:?}: {:?}",
-			len,
-			addr,
-			String::from_utf8_lossy(&buf[..len])
-		);
+	if std::env::var_os("RUST_LOG").is_none() {
+		std::env::set_var("RUST_LOG", "info")
 	}
+
+	pretty_env_logger::init_timed();
+
+	dht::launch_dht().await?;
+
+	info!("dht launched");
+
+	tokio::time::sleep(std::time::Duration::from_secs(99999)).await;
+
+	Ok(())
+
+	// let send_addr = "dht.transmissionbt.com:6881";
+
+	// let info_hash =
+	// 	hex::decode("").unwrap().try_into().unwrap();
+
+	// let info_hash = rand::thread_rng().gen::<[u8; 20]>();
+
+	// let nodes = select!(Vec<Node>)?;
 }

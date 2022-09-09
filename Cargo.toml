@@ -5,7 +5,11 @@ publish = false
 version = "0.1.0"
 
 [dependencies]
+bincode = "1"
 crc = "1"
+hex = "0.4"
+log = "0.4"
+pretty_env_logger = "0.4"
 rand = "0.8"
 reqwest = "0.11.11"
 serde = {version = "1", features = ["derive"]}
