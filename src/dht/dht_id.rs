@@ -25,6 +25,6 @@ fn magic_prefix_from_ip(ip: &Ipv4Addr, seed_r: u8) -> [u8; 3] {
 	let magic: u32 = 0x030f3fff;
 	let ip_int: u32 = u32::from_be_bytes(ip.octets());
 	let nonsense: u32 = (ip_int & magic) | (r32 << 29);
-	let crc: u32 = crc::crc32::checksum_castagnoli(&nonsense.to_be_bytes());
+	let crc: u32 = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI).checksum(&nonsense.to_be_bytes());
 	crc.to_be_bytes()[..3].try_into().unwrap()
 }
