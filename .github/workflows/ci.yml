@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build rust ${{ matrix.rust }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: hecrj/setup-rust-action@v1
+        with:
+          rust-version: ${{ matrix.rust }}
+
+      - run: cargo build
