@@ -24,4 +24,6 @@ jobs:
         with:
           rust-version: ${{ matrix.rust }}
 
+      - run: cargo fetch
+
       - run: cargo build
