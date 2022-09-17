@@ -3,6 +3,7 @@
 #[path = "serde_bytes_array.rs"]
 mod serde_bytes_array;
 
+use log::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
@@ -70,6 +71,9 @@ pub struct CompactInfo {
 }
 
 impl CompactInfo {
+	pub fn host(&self) -> String {
+		format!("{}:{}", self.ip_string(), self.port())
+	}
 	pub fn ip_string(&self) -> String {
 		format!("{}.{}.{}.{}", self.ip[0], self.ip[1], self.ip[2], self.ip[3])
 	}
@@ -94,22 +98,45 @@ impl<T: Serialize> Query<T> {
 	}
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Bytes {
 	#[serde(with = "serde_bytes")]
 	Bytes(Vec<u8>),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ResponseArgs {
 	#[serde(with = "serde_bytes")]
 	pub id: Vec<u8>,
 	pub token: Option<Bytes>,
 	pub nodes: Option<Bytes>,
+	pub values: Option<Vec<Bytes>>,
 	pub samples: Option<Bytes>,
 	pub interval: Option<i64>,
 	pub num: Option<i64>,
+}
+
+impl ResponseArgs {
+	pub fn id(&self) -> Result<[u8; 20], Vec<u8>> {
+		self.id.clone().try_into()
+	}
+	pub fn nodes(&self) -> Vec<CompactInfo> {
+		match self.nodes {
+			None => Vec::new(),
+			Some(Bytes::Bytes(ref bytes)) => bytes
+				.chunks_exact(26)
+				.filter_map(|chunk| {
+					bincode::deserialize(chunk)
+						.map_err(|e| {
+							warn!("deserialize nodes error: {e:?}");
+							e
+						})
+						.ok()
+				})
+				.collect(),
+		}
+	}
 }
 
 pub struct ParsedResponseArgs {

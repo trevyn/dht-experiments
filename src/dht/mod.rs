@@ -1,3 +1,5 @@
+#![allow(unused_macros)]
+
 mod dht_structs;
 use dht_structs::*;
 
@@ -7,6 +9,48 @@ use dht_id::*;
 use log::*;
 use tokio::net::UdpSocket;
 use turbosql::*;
+
+use once_cell::sync::{Lazy, OnceCell};
+
+#[derive(Debug)]
+pub enum Progress<T> {
+	Progress { status: String },
+	Complete { result: T, status: String },
+}
+
+type ProgressStream<T> = std::pin::Pin<
+	Box<dyn futures::Stream<Item = Result<Progress<T>, tracked::StringError>> + Send>,
+>;
+
+macro_rules! progress {
+	($($args:tt),*) => {{
+		Progress::Progress{status:format!($($args),*)}
+	}};
+}
+
+macro_rules! complete {
+	(result:$ret:expr, status:$($args:tt),*) => {{
+		Progress::Complete{result:$ret.into(), status:format!($($args),*)}
+	}};
+	(status:$arg:expr, result:$ret:expr) => {{
+		Progress::Complete{result:$ret.into(), status:format!($arg)}
+	}};
+	({result:$ret:expr, status:$($args:tt),*}) => {{
+		Progress::Complete{result:$ret.into(), status:format!($($args),*)}
+	}};
+	({status:$arg:expr, result:$ret:expr}) => {{
+		Progress::Complete{result:$ret.into(), status:format!($arg)}
+	}};
+	($ret:expr, $($args:tt),*) => {{
+		Progress::Complete{result:$ret.into(), status:format!($($args),*)}
+	}};
+}
+
+macro_rules! err {
+	($($args:tt),*) => {{
+		::core::result::Result::Err(format!($($args),*))
+	}};
+}
 
 #[derive(Turbosql, Default)]
 struct SelfId {
@@ -30,64 +74,78 @@ struct Infohash {
 	infohash: Option<[u8; 20]>,
 }
 
-pub async fn launch_dht() -> Result<(), Box<dyn std::error::Error>> {
+static BROADCAST: Lazy<tokio::sync::broadcast::Sender<ResponseArgs>> =
+	Lazy::new(|| tokio::sync::broadcast::channel(200).0);
+
+static SOCK: OnceCell<tokio::net::UdpSocket> = OnceCell::new();
+
+static SELF_ID: OnceCell<[u8; 20]> = OnceCell::new();
+
+#[tracked::tracked]
+pub async fn launch_dht() -> Result<(), tracked::StringError> {
 	let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
 
 	info!("external ip is {:?}", ip);
 
-	let id = match select!(Option<SelfId> "WHERE ip = " ip)? {
-		Some(SelfId { id, .. }) => id.unwrap(),
-		None => {
-			let id = id_from_ip(&ip.parse().unwrap());
-			SelfId { rowid: None, ip: Some(ip), id: Some(id) }.insert()?;
-			id
-		}
-	};
+	SELF_ID
+		.set(match select!(Option<SelfId> "WHERE ip = " ip)? {
+			Some(SelfId { id, .. }) => id.unwrap(),
+			None => {
+				let id = id_from_ip(&ip.parse().unwrap());
+				SelfId { rowid: None, ip: Some(ip), id: Some(id) }.insert()?;
+				id
+			}
+		})
+		.map_err(|_| "SELF_ID already set")?;
 
-	let sock = std::sync::Arc::new(UdpSocket::bind("0.0.0.0:55874").await?);
-	let sock_clone = sock.clone();
+	SOCK.set(UdpSocket::bind("0.0.0.0:55874").await?).map_err(|_| "SOCK already set")?;
 
-	let mut target = [0u8; 20];
-	rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
+	// let sock = std::sync::Arc::new();
+	// let sock_clone = sock.clone();
 
-	tokio::spawn(async move {
-		for node in select!(Vec<Node>).unwrap().into_iter() {
-			let host = node.host.as_ref().unwrap();
+	// let mut target = [0u8; 20];
+	// rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
 
-			let _ =
-				sock_clone.send_to(&SampleInfohashesQuery { id, target }.into_bytes(), &host).await;
+	// tokio::spawn(async move {
+	// 	for node in select!(Vec<Node>).unwrap().into_iter() {
+	// 		let host = node.host.as_ref().unwrap();
 
-			tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-			// println!("{:?} bytes sent to {:?}", len, host);
+	// 		SOCK.get()
+	// 			.unwrap()
+	// 			.send_to(
+	// 				&SampleInfohashesQuery { id: *SELF_ID.get().unwrap(), target }.into_bytes(),
+	// 				&host,
+	// 			)
+	// 			.await;
 
-			// let hostip = host.split(':').into_iter().next().unwrap();
-			// let host = format!("{}:6881", hostip);
-			// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
-			// println!("{:?} bytes sent to {:?}", len, host);
+	// 		tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+	// println!("{:?} bytes sent to {:?}", len, host);
 
-			// let host = format!("{}:6882", hostip);
-			// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
-			// println!("{:?} bytes sent to {:?}", len, host);
+	// let hostip = host.split(':').into_iter().next().unwrap();
+	// let host = format!("{}:6881", hostip);
+	// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
+	// println!("{:?} bytes sent to {:?}", len, host);
 
-			// let host = format!("{}:6883", hostip);
-			// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
-			// println!("{:?} bytes sent to {:?}", len, host);
+	// let host = format!("{}:6882", hostip);
+	// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
+	// println!("{:?} bytes sent to {:?}", len, host);
 
-			// let len = sock.send_to(&FindNodeQuery { id, target }.into_bytes(), &host).await?;
-			// println!("{:?} bytes sent to {:?}", len, host);
-		}
-	});
+	// let host = format!("{}:6883", hostip);
+	// let len = sock.send_to(&PingQuery { id }.into_bytes(), &host).await?;
+	// println!("{:?} bytes sent to {:?}", len, host);
+
+	// let len = sock.send_to(&FindNodeQuery { id, target }.into_bytes(), &host).await?;
+	// println!("{:?} bytes sent to {:?}", len, host);
+	// 	}
+	// });
 
 	tokio::spawn(async move {
 		let mut buf = [0; 1500];
 		loop {
-			let (len, addr) = match sock.recv_from(&mut buf).await {
-				Ok(stuff) => stuff,
-				Err(e) => {
-					error!("recv_from failed: {:?}", e);
-					std::process::exit(1);
-				}
-			};
+			let (len, addr) = SOCK.get().unwrap().recv_from(&mut buf).await.unwrap_or_else(|e| {
+				error!("recv_from failed: {:?}", e);
+				std::process::exit(1);
+			});
 
 			// println!(
 			// 	"{:?} bytes received from {:?}: {:?}",
@@ -97,7 +155,12 @@ pub async fn launch_dht() -> Result<(), Box<dyn std::error::Error>> {
 			// );
 
 			tokio::task::spawn_blocking(move || {
-				let _ = execute!("UPDATE node SET last_response_ms = " now_ms() " WHERE host = " addr.to_string());
+				execute!(
+					"UPDATE node"
+					"SET last_response_ms = " now_ms()
+					"WHERE host = " addr.to_string()
+				)
+				.unwrap();
 			});
 
 			if let Ok(response) = Response::from_bytes(&buf[..len]) {
@@ -134,20 +197,112 @@ fn process_response(
 		}
 	}
 
-	if let ResponseArgs { nodes: Some(Bytes::Bytes(nodes)), .. } = response {
-		for chunk in nodes.chunks_exact(26) {
-			let a: Result<dht_structs::CompactInfo, _> = bincode::deserialize(chunk);
+	for node in response.nodes() {
+		let host = format!("{}:{}", node.ip_string(), node.port());
+		// dbg!(&host);
+		if select!(Option<Node> "WHERE host = " host)?.is_none() {
+			Node { host: Some(host), id: Some(node.id), ..Default::default() }.insert()?;
+		} else {
+			execute!(
+				"UPDATE node"
+				"SET id = " node.id
+				"WHERE host = " host
+			)?;
+		}
+	}
 
-			if let Ok(a) = a {
-				let host = format!("{}:{}", a.ip_string(), a.port());
-				// dbg!(&host);
-				if select!(Option<Node> "WHERE host = " host)?.is_none() {
-					Node { host: Some(host), id: Some(a.id), ..Default::default() }.insert()?;
-				} else {
-					execute!("UPDATE node SET id = " a.id " WHERE host = " host)?;
+	BROADCAST.send(response)?;
+
+	// if let ResponseArgs { nodes: Some(Bytes::Bytes(nodes)), .. } = response {
+	// 	for chunk in nodes.chunks_exact(26) {
+	// 		let a: Result<dht_structs::CompactInfo, _> = bincode::deserialize(chunk);
+
+	// 		if let Ok(a) = a {}
+	// 	}
+	// }
+
+	Ok(())
+}
+
+#[tracked::tracked]
+pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
+	let infohash = infohash.into();
+	Box::pin(async_stream::try_stream! {
+		let mut packets_sent = 0;
+		let mut packets_recv = 0;
+		let mut our_ids = std::collections::HashSet::new();
+		let mut peers = std::collections::HashSet::new();
+
+		let info_hash: [u8; 20] =
+			hex::decode(&infohash)?.try_into().map_err(|_| "infohash not 20 hex bytes")?;
+
+		yield progress!("loading for infohash {infohash}");
+
+		// err!("ohno")?;
+		// 	// yield complete!({
+		// 	// 	result: "datagoeshere",
+		// 	// 	status: "loading complete for infohash {infohash}",
+		// 	// });
+
+		let mut receiver = BROADCAST.subscribe();
+
+		for node in
+			select!(Vec<Node> "WHERE rowid IN (SELECT rowid FROM node ORDER BY RANDOM() LIMIT 20)")?
+				.into_iter()
+		{
+			// let host = ;
+			our_ids.insert(node.id.unwrap());
+
+			SOCK.get()
+				.unwrap()
+				.send_to(
+					&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }.into_bytes(),
+					&node.host.as_ref().unwrap(),
+				)
+				.await?;
+
+			packets_sent += 1;
+		}
+
+		loop {
+			yield progress!(
+				"loading dht for infohash {infohash}; sent {packets_sent}, recv {packets_recv}, peers {}", (peers.len())
+			);
+
+			let response = receiver.recv().await.unwrap();
+
+			packets_recv += 1;
+
+			if our_ids.contains(&response.id().unwrap()) {
+				for node in response.nodes() {
+					if our_ids.insert(node.id) {
+						SOCK.get()
+							.unwrap()
+							.send_to(
+								&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }
+									.into_bytes(),
+								&node.host(),
+							)
+							.await
+							.map_err(|e| format!("{:?} {:?}", e, node.host()))?;
+
+						packets_sent += 1;
+					}
+				}
+
+				if let Some(values) = response.values {
+					for Bytes::Bytes(value) in values {
+						let value: [u8; 6] = value.try_into().unwrap();
+						peers.insert(value);
+					}
 				}
 			}
 		}
-	}
-	Ok(())
+
+		// yield complete! {
+		// 	status: "loading complete for infohash",
+		// 	result: "datagoeshere"
+		// };
+		// 	// yield complete!("done", "loading for infohash {infohash}");
+	})
 }
