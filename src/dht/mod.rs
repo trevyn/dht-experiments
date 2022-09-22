@@ -286,33 +286,9 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 
 				if let Some(values) = response.values {
 					for peer in values {
-						if peers.insert(peer.clone()) {
-							// println!("{}", peer.host());
-							tokio::spawn(async move {
-								if let Ok(mut stream) = tokio::net::TcpStream::connect(peer.host()).await {
-									info!("connected {}", peer.host());
-
-									let n = stream
-										.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes())
-										.await
-										.unwrap();
-									info!("write {} bytes to {}", n, peer.host());
-
-									let mut buffer = [0; 10240];
-									loop {
-										let n = stream.read(&mut buffer[..]).await.unwrap();
-										info!(
-											"read {} bytes from {}: {:?}",
-											n,
-											peer.host(),
-											String::from_utf8_lossy(&buffer[0..n])
-										);
-										if n == 0 {
-											break;
-										}
-									}
-								}
-							});
+						let host = peer.host();
+						if peers.insert(peer) {
+							spawn_peer(host, info_hash);
 						}
 					}
 				}
@@ -325,4 +301,21 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 		// };
 		// 	// yield complete!("done", "loading for infohash {infohash}");
 	})
+}
+
+fn spawn_peer(host: String, info_hash: [u8; 20]) {
+	tokio::spawn(async move {
+		let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
+
+		s.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes()).await.unwrap();
+
+		let mut buffer = [0; 10240];
+		loop {
+			let n = s.read(&mut buffer[..]).await.unwrap();
+			info!("read {} bytes from {}: {:?}", n, host, String::from_utf8_lossy(&buffer[0..n]));
+			if n == 0 {
+				break;
+			}
+		}
+	});
 }
