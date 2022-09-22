@@ -7,7 +7,10 @@ mod dht_id;
 use dht_id::*;
 
 use log::*;
-use tokio::net::UdpSocket;
+use tokio::{
+	io::{AsyncReadExt, AsyncWriteExt},
+	net::UdpSocket,
+};
 use turbosql::*;
 
 use once_cell::sync::{Lazy, OnceCell};
@@ -18,9 +21,8 @@ pub enum Progress<T> {
 	Complete { result: T, status: String },
 }
 
-type ProgressStream<T> = std::pin::Pin<
-	Box<dyn futures::Stream<Item = Result<Progress<T>, tracked::StringError>> + Send>,
->;
+type ProgressStream<T> =
+	std::pin::Pin<Box<dyn futures::Stream<Item = Result<Progress<T>, tracked::StringError>> + Send>>;
 
 macro_rules! progress {
 	($($args:tt),*) => {{
@@ -191,24 +193,18 @@ fn process_response(
 
 		for infohash in samples.chunks_exact(20) {
 			if select!(Option<Infohash> "WHERE infohash = " infohash)?.is_none() {
-				Infohash { infohash: Some(infohash.try_into().unwrap()), ..Default::default() }
-					.insert()?;
+				Infohash { infohash: Some(infohash.try_into().unwrap()), ..Default::default() }.insert()?;
 			}
 		}
 	}
 
 	for node in response.nodes() {
-		let host = format!("{}:{}", node.ip_string(), node.port());
-		// dbg!(&host);
-		if select!(Option<Node> "WHERE host = " host)?.is_none() {
-			Node { host: Some(host), id: Some(node.id), ..Default::default() }.insert()?;
-		} else {
-			execute!(
-				"UPDATE node"
-				"SET id = " node.id
-				"WHERE host = " host
-			)?;
-		}
+		let host = node.host();
+		execute!(
+			"INSERT INTO node(host, id)"
+			"VALUES (" host, node.id ")"
+			"ON CONFLICT(host) DO UPDATE SET id = " node.id
+		)?;
 	}
 
 	BROADCAST.send(response)?;
@@ -245,7 +241,8 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 			// let host = ;
 			our_ids.insert(node.id.unwrap());
 
-			SOCK.get()
+			SOCK
+				.get()
 				.unwrap()
 				.send_to(
 					&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }.into_bytes(),
@@ -258,34 +255,52 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 
 		loop {
 			yield progress!(
-				"loading dht for infohash {infohash}; sent {packets_sent}, recv {packets_recv}, peers {}", (peers.len())
+				"loading dht for infohash {infohash}; sent {packets_sent}, recv {packets_recv}, peers {}",
+				(peers.len())
 			);
 
 			let response = receiver.recv().await.unwrap();
 
 			packets_recv += 1;
 
-			if our_ids.contains(&response.id().unwrap()) {
+			if our_ids.contains(&response.id()) {
 				for node in response.nodes() {
 					if our_ids.insert(node.id) {
-						SOCK.get()
+						SOCK
+							.get()
 							.unwrap()
 							.send_to(
-								&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }
-									.into_bytes(),
+								&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }.into_bytes(),
 								&node.host(),
 							)
 							.await
-							.map_err(|e| format!("{:?} {:?}", e, node.host()))?;
+							.map_err(|e| warn!("{:?} {:?}", e, node.host()))
+							.ok();
 
 						packets_sent += 1;
 					}
 				}
 
 				if let Some(values) = response.values {
-					for Bytes::Bytes(value) in values {
-						let value: [u8; 6] = value.try_into().unwrap();
-						peers.insert(value);
+					for peer in values {
+						if peers.insert(peer.clone()) {
+							// println!("{}", peer.host());
+							tokio::spawn(async move {
+								if let Ok(mut stream) = tokio::net::TcpStream::connect(peer.host()).await {
+									info!("connected {}", peer.host());
+
+									let n = stream
+										.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes())
+										.await
+										.unwrap();
+									info!("write {} bytes to {}", n, peer.host());
+
+									let mut buffer = [0; 1024];
+									let n = stream.read(&mut buffer[..]).await.unwrap();
+									info!("read {} bytes from {}", n, peer.host());
+								}
+							});
+						}
 					}
 				}
 			}

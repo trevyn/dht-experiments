@@ -1,3 +1,5 @@
+#![feature(slice_as_chunks)]
+
 mod dht;
 
 use futures::StreamExt;
@@ -11,6 +13,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	pretty_env_logger::init_timed();
 
+	info!("start");
+
 	dht::launch_dht().await?;
 
 	info!("dht launched");
@@ -19,7 +23,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		let mut s = dht::get_peers("dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c");
 
 		while let Some(x) = s.next().await {
-			dbg!(x).ok();
+			// dbg!(x).ok();
 		}
 
 		dbg!("None");
@@ -28,13 +32,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tokio::time::sleep(std::time::Duration::MAX).await;
 
 	Ok(())
-
-	// let send_addr = "dht.transmissionbt.com:6881";
-
-	// let info_hash =
-	// 	hex::decode("").unwrap().try_into().unwrap();
-
-	// let info_hash = rand::thread_rng().gen::<[u8; 20]>();
-
-	// let nodes = select!(Vec<Node>)?;
 }

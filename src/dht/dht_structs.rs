@@ -3,8 +3,15 @@
 #[path = "serde_bytes_array.rs"]
 mod serde_bytes_array;
 
+use bincode::{Decode, Encode};
 use log::*;
 use serde::{Deserialize, Serialize};
+
+static CONFIG: bincode::config::Configuration<
+	bincode::config::LittleEndian,
+	bincode::config::Varint,
+	bincode::config::SkipFixedArrayLength,
+> = bincode::config::standard().skip_fixed_array_length();
 
 #[derive(Debug, Serialize)]
 pub struct PingQuery {
@@ -60,7 +67,7 @@ impl SampleInfohashesQuery {
 	}
 }
 
-#[derive(Debug, bincode::Decode)]
+#[derive(Debug, Decode)]
 pub struct CompactInfo {
 	pub id: [u8; 20],
 	pub ip: [u8; 4],
@@ -76,6 +83,35 @@ impl CompactInfo {
 	}
 	pub fn port(&self) -> u16 {
 		u16::from_be_bytes(self.port)
+	}
+}
+
+#[derive(Debug)]
+pub struct Handshake {
+	pub info_hash: [u8; 20],
+	pub peer_id: [u8; 20],
+}
+
+impl Handshake {
+	pub fn to_bytes(&self) -> Vec<u8> {
+		#[derive(Debug, Encode)]
+		struct HandshakeInner {
+			magic: &'static str,
+			reserved: [u8; 8],
+			info_hash: [u8; 20],
+			peer_id: [u8; 20],
+		}
+
+		bincode::encode_to_vec(
+			HandshakeInner {
+				magic: "BitTorrent protocol",
+				reserved: Default::default(),
+				info_hash: self.info_hash,
+				peer_id: self.peer_id,
+			},
+			CONFIG,
+		)
+		.unwrap()
 	}
 }
 
@@ -95,11 +131,39 @@ impl<T: Serialize> Query<T> {
 	}
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash)]
+#[serde(untagged)]
+pub enum Peer {
+	#[serde(with = "serde_bytes")]
+	Peer(Vec<u8>),
+}
+
+impl Peer {
+	pub fn host(&self) -> String {
+		format!("{}:{}", self.ip_string(), self.port())
+	}
+	pub fn ip_string(&self) -> String {
+		let Peer::Peer(peer) = self;
+		format!("{}.{}.{}.{}", peer[0], peer[1], peer[2], peer[3])
+	}
+	pub fn port(&self) -> u16 {
+		let Peer::Peer(peer) = self;
+		u16::from_be_bytes(peer[4..6].try_into().unwrap())
+	}
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Bytes {
 	#[serde(with = "serde_bytes")]
 	Bytes(Vec<u8>),
+}
+
+impl Default for &Bytes {
+	fn default() -> Self {
+		static EMPTY: Bytes = Bytes::Bytes(Vec::new());
+		&EMPTY
+	}
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -108,45 +172,21 @@ pub struct ResponseArgs {
 	pub id: Vec<u8>,
 	pub token: Option<Bytes>,
 	pub nodes: Option<Bytes>,
-	pub values: Option<Vec<Bytes>>,
+	pub values: Option<Vec<Peer>>,
 	pub samples: Option<Bytes>,
 	pub interval: Option<i64>,
 	pub num: Option<i64>,
 }
 
 impl ResponseArgs {
-	pub fn id(&self) -> Result<[u8; 20], Vec<u8>> {
-		self.id.clone().try_into()
+	pub fn id(&self) -> [u8; 20] {
+		self.id.as_chunks().0[0]
+		// self.id.clone().try_into()
 	}
 	pub fn nodes(&self) -> Vec<CompactInfo> {
-		match self.nodes {
-			None => Vec::new(),
-			Some(Bytes::Bytes(ref bytes)) => bytes
-				.chunks_exact(26)
-				.filter_map(|chunk| {
-					bincode::decode_from_slice(
-						chunk,
-						bincode::config::standard().skip_fixed_array_length().with_limit::<26>(),
-					)
-					.map_err(|e| {
-						warn!("deserialize nodes error: {e:?}");
-						e
-					})
-					.map(|r| r.0)
-					.ok()
-				})
-				.collect(),
-		}
+		let Bytes::Bytes(bytes) = self.nodes.as_ref().unwrap_or_default();
+		bytes.chunks_exact(26).map(|c| bincode::decode_from_slice(c, CONFIG).unwrap().0).collect()
 	}
-}
-
-pub struct ParsedResponseArgs {
-	pub id: [u8; 20],
-	pub token: Option<Vec<u8>>,
-	pub nodes: Option<Vec<CompactInfo>>,
-	pub samples: Option<Vec<[u8; 20]>>,
-	pub interval: Option<i64>,
-	pub num: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
