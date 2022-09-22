@@ -213,14 +213,6 @@ fn process_response(
 
 	BROADCAST.send(response)?;
 
-	// if let ResponseArgs { nodes: Some(Bytes::Bytes(nodes)), .. } = response {
-	// 	for chunk in nodes.chunks_exact(26) {
-	// 		let a: Result<dht_structs::CompactInfo, _> = bincode::deserialize(chunk);
-
-	// 		if let Ok(a) = a {}
-	// 	}
-	// }
-
 	Ok(())
 }
 

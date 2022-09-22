@@ -60,13 +60,10 @@ impl SampleInfohashesQuery {
 	}
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, bincode::Decode)]
 pub struct CompactInfo {
-	// #[serde(with = "serde_bytes_array")]
 	pub id: [u8; 20],
-	// #[serde(with = "serde_bytes_array")]
 	pub ip: [u8; 4],
-	// #[serde(with = "serde_bytes_array")]
 	port: [u8; 2],
 }
 
@@ -127,12 +124,16 @@ impl ResponseArgs {
 			Some(Bytes::Bytes(ref bytes)) => bytes
 				.chunks_exact(26)
 				.filter_map(|chunk| {
-					bincode::deserialize(chunk)
-						.map_err(|e| {
-							warn!("deserialize nodes error: {e:?}");
-							e
-						})
-						.ok()
+					bincode::decode_from_slice(
+						chunk,
+						bincode::config::standard().skip_fixed_array_length().with_limit::<26>(),
+					)
+					.map_err(|e| {
+						warn!("deserialize nodes error: {e:?}");
+						e
+					})
+					.map(|r| r.0)
+					.ok()
 				})
 				.collect(),
 		}
