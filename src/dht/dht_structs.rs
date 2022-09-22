@@ -86,35 +86,6 @@ impl CompactInfo {
 	}
 }
 
-#[derive(Debug)]
-pub struct Handshake {
-	pub info_hash: [u8; 20],
-	pub peer_id: [u8; 20],
-}
-
-impl Handshake {
-	pub fn to_bytes(&self) -> Vec<u8> {
-		#[derive(Debug, Encode)]
-		struct HandshakeInner {
-			magic: &'static str,
-			reserved: [u8; 8],
-			info_hash: [u8; 20],
-			peer_id: [u8; 20],
-		}
-
-		bincode::encode_to_vec(
-			HandshakeInner {
-				magic: "BitTorrent protocol",
-				reserved: Default::default(),
-				info_hash: self.info_hash,
-				peer_id: self.peer_id,
-			},
-			CONFIG,
-		)
-		.unwrap()
-	}
-}
-
 #[derive(Debug, Serialize)]
 struct Query<T> {
 	#[serde(with = "serde_bytes")]

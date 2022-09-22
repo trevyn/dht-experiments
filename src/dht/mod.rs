@@ -3,6 +3,9 @@
 mod dht_structs;
 use dht_structs::*;
 
+mod bt_structs;
+use bt_structs::*;
+
 mod dht_id;
 use dht_id::*;
 
@@ -295,9 +298,19 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 										.unwrap();
 									info!("write {} bytes to {}", n, peer.host());
 
-									let mut buffer = [0; 1024];
-									let n = stream.read(&mut buffer[..]).await.unwrap();
-									info!("read {} bytes from {}", n, peer.host());
+									let mut buffer = [0; 10240];
+									loop {
+										let n = stream.read(&mut buffer[..]).await.unwrap();
+										info!(
+											"read {} bytes from {}: {:?}",
+											n,
+											peer.host(),
+											String::from_utf8_lossy(&buffer[0..n])
+										);
+										if n == 0 {
+											break;
+										}
+									}
 								}
 							});
 						}
