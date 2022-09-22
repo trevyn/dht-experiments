@@ -306,15 +306,42 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 fn spawn_peer(host: String, info_hash: [u8; 20]) {
 	tokio::spawn(async move {
 		let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
+		let (rx, mut tx) = s.split();
+		let mut rx = tokio::io::BufReader::new(rx);
 
-		s.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes()).await.unwrap();
+		tx.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes()).await.unwrap();
 
-		let mut buffer = [0; 10240];
+		let mut handshake = [0; 68];
+		rx.read_exact(&mut handshake).await.unwrap();
+
 		loop {
-			let n = s.read(&mut buffer[..]).await.unwrap();
-			info!("read {} bytes from {}: {:?}", n, host, String::from_utf8_lossy(&buffer[0..n]));
-			if n == 0 {
-				break;
+			let len = rx.read_u32().await.unwrap();
+
+			if len == 0 {
+				info!("len 0 from {}", host);
+				continue;
+			}
+
+			if len > 2048 {
+				panic!("len > 2048");
+			}
+
+			let mut data = [0; 2048];
+			let n = rx.read_exact(&mut data[..len as usize]).await.unwrap();
+			assert_eq!(n, len as usize);
+
+			match data[0] {
+				20 => {
+					let ext = ExtensionHandshake::from_bytes(&data[2..len as usize]).unwrap();
+					dbg!(ext);
+				}
+				_ => info!(
+					"read {} data bytes (type {}) from {}: {:?}",
+					n,
+					data[0],
+					host,
+					String::from_utf8_lossy(&data[..len as usize])
+				),
 			}
 		}
 	});

@@ -54,18 +54,25 @@ impl Handshake {
 	}
 }
 
-#[derive(Default, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ExtensionHandshake {
 	m: MetadataExtension,
+	metadata_size: Option<u32>,
 }
 
-#[derive(Serialize)]
+impl<'a> ExtensionHandshake {
+	pub fn from_bytes(buf: &'a [u8]) -> Result<ExtensionHandshake, serde_bencode::Error> {
+		serde_bencode::de::from_bytes::<ExtensionHandshake>(buf)
+	}
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MetadataExtension {
-	pub ut_metadata: u8,
+	pub ut_metadata: Option<u32>,
 }
 
 impl Default for MetadataExtension {
 	fn default() -> Self {
-		Self { ut_metadata: 1 }
+		Self { ut_metadata: Some(1) }
 	}
 }
