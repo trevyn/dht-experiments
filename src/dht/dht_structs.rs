@@ -151,8 +151,9 @@ pub struct ResponseArgs {
 
 impl ResponseArgs {
 	pub fn id(&self) -> [u8; 20] {
-		self.id.as_chunks().0[0]
-		// self.id.clone().try_into()
+		let mut a = [0; 20];
+		a.copy_from_slice(&self.id);
+		a
 	}
 	pub fn nodes(&self) -> Vec<CompactInfo> {
 		let Bytes::Bytes(bytes) = self.nodes.as_ref().unwrap_or_default();
