@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[path = "serde_bytes_array.rs"]
 mod serde_bytes_array;
 
@@ -56,8 +54,8 @@ impl Handshake {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ExtensionHandshake {
-	m: MetadataExtension,
-	metadata_size: Option<u32>,
+	pub m: MetadataExtension,
+	pub metadata_size: Option<usize>,
 }
 
 impl<'a> ExtensionHandshake {
@@ -68,11 +66,32 @@ impl<'a> ExtensionHandshake {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MetadataExtension {
-	pub ut_metadata: Option<u32>,
+	pub ut_metadata: Option<u8>,
 }
 
 impl Default for MetadataExtension {
 	fn default() -> Self {
-		Self { ut_metadata: Some(1) }
+		Self { ut_metadata: Some(2) }
+	}
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct MetadataMessage {
+	pub msg_type: usize,
+	pub piece: usize,
+}
+
+impl MetadataMessage {
+	pub fn to_bytes(&self, extension_id: u8) -> Vec<u8> {
+		let msg = serde_bencode::to_bytes(self).unwrap();
+
+		let mut out = Vec::with_capacity(msg.len() + 6);
+
+		out.extend_from_slice(&((msg.len() + 2) as u32).to_be_bytes());
+		out.push(20);
+		out.push(extension_id);
+		out.extend_from_slice(&msg);
+
+		out
 	}
 }

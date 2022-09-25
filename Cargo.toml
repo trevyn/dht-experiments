@@ -20,4 +20,5 @@ serde_bencode = "0.2"
 serde_bytes = "0.11"
 tokio = {version = "1", features = ["macros", "net", "rt-multi-thread"]}
 tracked = "0.5"
+turbomod = "0.1"
 turbosql = {git = "https://github.com/trevyn/turbosql"}

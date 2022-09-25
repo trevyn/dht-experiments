@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tokio::spawn(async move {
 		let mut s = dht::get_peers("dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c");
 
-		while let Some(x) = s.next().await {
+		while let Some(_x) = s.next().await {
 			// dbg!(x).ok();
 		}
 

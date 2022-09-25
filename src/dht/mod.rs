@@ -1,22 +1,14 @@
-#![allow(unused_macros)]
+#![allow(unused_macros, dead_code, clippy::duplicate_mod, unused_imports)]
 
-mod dht_structs;
-use dht_structs::*;
-
-mod bt_structs;
-use bt_structs::*;
-
-mod dht_id;
-use dht_id::*;
+turbomod::dir!(use "src/dht");
 
 use log::*;
+use once_cell::sync::{Lazy, OnceCell};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::UdpSocket,
 };
 use turbosql::*;
-
-use once_cell::sync::{Lazy, OnceCell};
 
 #[derive(Debug)]
 pub enum Progress<T> {
@@ -54,6 +46,12 @@ macro_rules! complete {
 macro_rules! err {
 	($($args:tt),*) => {{
 		::core::result::Result::Err(format!($($args),*))
+	}};
+}
+
+macro_rules! self_id {
+	() => {{
+		*SELF_ID.get().unwrap()
 	}};
 }
 
@@ -191,7 +189,7 @@ fn process_response(
 			samples.len(),
 			num,
 			interval,
-			addr.to_string()
+			addr
 		);
 
 		for infohash in samples.chunks_exact(20) {
@@ -227,6 +225,8 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 		let info_hash: [u8; 20] =
 			hex::decode(&infohash)?.try_into().map_err(|_| "infohash not 20 hex bytes")?;
 
+		let metainfo = MetaInfo::new(info_hash);
+
 		yield progress!("loading for infohash {infohash}");
 
 		// err!("ohno")?;
@@ -248,7 +248,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 				.get()
 				.unwrap()
 				.send_to(
-					&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }.into_bytes(),
+					&GetPeersQuery { id: self_id!(), info_hash }.into_bytes(),
 					&node.host.as_ref().unwrap(),
 				)
 				.await?;
@@ -272,10 +272,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 						SOCK
 							.get()
 							.unwrap()
-							.send_to(
-								&GetPeersQuery { id: *SELF_ID.get().unwrap(), info_hash }.into_bytes(),
-								&node.host(),
-							)
+							.send_to(&GetPeersQuery { id: self_id!(), info_hash }.into_bytes(), &node.host())
 							.await
 							.map_err(|e| warn!("{:?} {:?}", e, node.host()))
 							.ok();
@@ -288,7 +285,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 					for peer in values {
 						let host = peer.host();
 						if peers.insert(peer) {
-							spawn_peer(host, info_hash);
+							spawn_peer(host, metainfo.clone());
 						}
 					}
 				}
@@ -303,45 +300,60 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	})
 }
 
-fn spawn_peer(host: String, info_hash: [u8; 20]) {
+fn spawn_peer(host: String, metainfo: MetaInfo) {
 	tokio::spawn(async move {
 		let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
 		let (rx, mut tx) = s.split();
 		let mut rx = tokio::io::BufReader::new(rx);
 
-		tx.write(&Handshake { info_hash, peer_id: *SELF_ID.get().unwrap() }.to_bytes()).await.unwrap();
+		tx
+			.write_all(&Handshake { info_hash: metainfo.infohash(), peer_id: self_id!() }.to_bytes())
+			.await
+			.unwrap();
 
 		let mut handshake = [0; 68];
 		rx.read_exact(&mut handshake).await.unwrap();
 
 		loop {
-			let len = rx.read_u32().await.unwrap();
+			let len = rx.read_u32().await.unwrap() as usize;
 
 			if len == 0 {
 				info!("len 0 from {}", host);
 				continue;
 			}
 
-			if len > 2048 {
-				panic!("len > 2048");
+			if len > 32768 {
+				panic!("len > 32768");
 			}
 
-			let mut data = [0; 2048];
-			let n = rx.read_exact(&mut data[..len as usize]).await.unwrap();
-			assert_eq!(n, len as usize);
+			let mut data = vec![0; len];
+			let n = rx.read_exact(&mut data).await.unwrap();
+			assert_eq!(n, len);
 
-			match data[0] {
-				20 => {
-					let ext = ExtensionHandshake::from_bytes(&data[2..len as usize]).unwrap();
-					dbg!(ext);
+			if len == 1 {
+				info!("read 1 data byte ({}) from {}", data[0], host);
+				continue;
+			}
+
+			match data[0..=1] {
+				[20, 0] => {
+					let ext = ExtensionHandshake::from_bytes(&data[2..len]).unwrap();
+					if let Some(extension_id) = ext.m.ut_metadata {
+						metainfo.got_size(ext.metadata_size.unwrap()).await;
+						if let Some(piece) = metainfo.which_piece().await {
+							tx.write_all(&MetadataMessage { msg_type: 0, piece }.to_bytes(extension_id)).await.unwrap();
+						}
+					}
 				}
-				_ => info!(
-					"read {} data bytes (type {}) from {}: {:?}",
-					n,
-					data[0],
-					host,
-					String::from_utf8_lossy(&data[..len as usize])
-				),
+				_ => {
+					info!(
+						"read {} data bytes (type {}) from {}: {:?}",
+						n,
+						data[0],
+						host,
+						String::from_utf8_lossy(&data)
+					)
+				}
 			}
 		}
 	});

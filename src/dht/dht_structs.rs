@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 #[path = "serde_bytes_array.rs"]
 mod serde_bytes_array;
 

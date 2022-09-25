@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use serde::de::Error;
 use serde::{Deserializer, Serializer};
 
