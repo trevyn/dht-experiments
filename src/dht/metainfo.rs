@@ -1,6 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::ops::Rem;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
 use std::usize::MAX;
 use tokio::sync::Mutex;
@@ -95,17 +93,14 @@ impl MetaInfo {
 		assert_eq!(msg.total_size, Some(inner.size));
 		let start = msg.piece * 16384;
 		let end = std::cmp::min(start + 16384, inner.size);
-		inner.data[start..end].clone_from_slice(&data[(data.len() - (end - start))..data.len()]);
-		dbg!(self.verify(&inner.data));
-	}
-
-	async fn got_piece(&self, i: usize, piece: &[u8]) {
-		let mut guard = self.inner.lock().await;
-		let inner = guard.as_mut().unwrap();
-		let offset = i * 16384;
-		inner.data[offset..offset + piece.len()].clone_from_slice(piece);
-		inner.pieces[i] = MAX;
-		dbg!(self.verify(&inner.data));
+		inner.data[start..end].copy_from_slice(&data[(data.len() - (end - start))..data.len()]);
+		if self.verify(&inner.data) {
+			let dict = serde_bencode::de::from_bytes::<InfoDict>(&inner.data).unwrap();
+			dbg!(dict.name);
+			dbg!(dict.piece_length);
+			dbg!(dict.length);
+			dbg!(dict.files);
+		}
 	}
 
 	fn verify(&self, data: &[u8]) -> bool {
@@ -117,4 +112,21 @@ impl MetaInfo {
 	}
 
 	fn subscribe() {}
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InfoDict {
+	name: String,
+	#[serde(rename = "piece length")]
+	piece_length: usize,
+	#[serde(with = "serde_bytes")]
+	pieces: Vec<u8>,
+	length: Option<usize>,
+	files: Option<Vec<File>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct File {
+	length: usize,
+	path: Vec<String>,
 }

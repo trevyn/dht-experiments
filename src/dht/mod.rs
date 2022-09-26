@@ -285,7 +285,10 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 					for peer in values {
 						let host = peer.host();
 						if peers.insert(peer) {
-							spawn_peer(host, metainfo.clone());
+							let metainfo = metainfo.clone();
+							tokio::spawn(async move {
+								run_peer(host, metainfo).await;
+							});
 						}
 					}
 				}
@@ -300,72 +303,70 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	})
 }
 
-fn spawn_peer(host: String, metainfo: MetaInfo) {
-	tokio::spawn(async move {
-		let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
-		let (rx, mut tx) = s.split();
-		let mut rx = tokio::io::BufReader::new(rx);
+async fn run_peer(host: String, metainfo: MetaInfo) {
+	let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
+	let (rx, mut tx) = s.split();
+	let mut rx = tokio::io::BufReader::new(rx);
 
-		let mut remote_extension_id = None;
+	let mut remote_extension_id = None;
 
-		tx
-			.write_all(&Handshake { info_hash: metainfo.infohash(), peer_id: self_id!() }.to_bytes())
-			.await
-			.unwrap();
+	tx
+		.write_all(&Handshake { info_hash: metainfo.infohash(), peer_id: self_id!() }.to_bytes())
+		.await
+		.unwrap();
 
-		let mut handshake = [0; 68];
-		rx.read_exact(&mut handshake).await.unwrap();
+	let mut handshake = [0; 68];
+	rx.read_exact(&mut handshake).await.unwrap();
 
-		loop {
-			let len = rx.read_u32().await.unwrap() as usize;
+	loop {
+		let len = rx.read_u32().await.unwrap() as usize;
 
-			if len == 0 {
-				info!("len 0 from {}", host);
-				continue;
-			}
+		if len == 0 {
+			info!("len 0 from {}", host);
+			continue;
+		}
 
-			if len > 32768 {
-				panic!("len > 32768");
-			}
+		if len > 32768 {
+			panic!("len > 32768");
+		}
 
-			let mut data = vec![0; len];
-			let n = rx.read_exact(&mut data).await.unwrap();
-			assert_eq!(n, len);
+		let mut data = vec![0; len];
+		let n = rx.read_exact(&mut data).await.unwrap();
+		assert_eq!(n, len);
 
-			if len == 1 {
-				info!("read 1 data byte ({}) from {}", data[0], host);
-				continue;
-			}
+		if len == 1 {
+			info!("read 1 data byte ({}) from {}", data[0], host);
+			continue;
+		}
 
-			match data[0..=1] {
-				[20, 0] => {
-					let ext = ExtensionHandshake::from_bytes(&data[2..len]).unwrap();
-					remote_extension_id = ext.m.ut_metadata;
-					if let Some(extension_id) = remote_extension_id {
-						metainfo.got_size(ext.metadata_size.unwrap()).await;
-						if let Some(piece) = metainfo.which_piece().await {
-							tx
-								.write_all(&MetadataMessage { msg_type: 0, piece, total_size: None }.to_bytes(extension_id))
-								.await
-								.unwrap();
-						}
+		match data[0..=1] {
+			[20, 0] => {
+				let ext = ExtensionHandshake::from_bytes(&data[2..len]).unwrap();
+				remote_extension_id = ext.m.ut_metadata;
+				if let Some(extension_id) = remote_extension_id {
+					metainfo.got_size(ext.metadata_size.unwrap()).await;
+					if let Some(piece) = metainfo.which_piece().await {
+						tx
+							.write_all(&MetadataMessage { msg_type: 0, piece, total_size: None }.to_bytes(extension_id))
+							.await
+							.unwrap();
 					}
 				}
+			}
 
-				[20, 2] => {
-					metainfo.got_metadata_message(&data[2..len]).await;
-				}
+			[20, 2] => {
+				metainfo.got_metadata_message(&data[2..len]).await;
+			}
 
-				_ => {
-					info!(
-						"read {} data bytes (type {}) from {}: {:?}",
-						n,
-						data[0],
-						host,
-						String::from_utf8_lossy(&data)
-					)
-				}
+			_ => {
+				info!(
+					"read {} data bytes (type {}) from {}: {:?}",
+					n,
+					data[0],
+					host,
+					String::from_utf8_lossy(&data)
+				)
 			}
 		}
-	});
+	}
 }
