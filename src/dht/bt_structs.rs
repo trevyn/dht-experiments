@@ -59,8 +59,8 @@ pub struct ExtensionHandshake {
 }
 
 impl<'a> ExtensionHandshake {
-	pub fn from_bytes(buf: &'a [u8]) -> Result<ExtensionHandshake, serde_bencode::Error> {
-		serde_bencode::de::from_bytes::<ExtensionHandshake>(buf)
+	pub fn from_bytes(buf: &'a [u8]) -> Result<Self, serde_bencode::Error> {
+		serde_bencode::de::from_bytes::<Self>(buf)
 	}
 }
 
@@ -72,26 +72,5 @@ pub struct MetadataExtension {
 impl Default for MetadataExtension {
 	fn default() -> Self {
 		Self { ut_metadata: Some(2) }
-	}
-}
-
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct MetadataMessage {
-	pub msg_type: usize,
-	pub piece: usize,
-}
-
-impl MetadataMessage {
-	pub fn to_bytes(&self, extension_id: u8) -> Vec<u8> {
-		let msg = serde_bencode::to_bytes(self).unwrap();
-
-		let mut out = Vec::with_capacity(msg.len() + 6);
-
-		out.extend_from_slice(&((msg.len() + 2) as u32).to_be_bytes());
-		out.push(20);
-		out.push(extension_id);
-		out.extend_from_slice(&msg);
-
-		out
 	}
 }

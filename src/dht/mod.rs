@@ -306,6 +306,8 @@ fn spawn_peer(host: String, metainfo: MetaInfo) {
 		let (rx, mut tx) = s.split();
 		let mut rx = tokio::io::BufReader::new(rx);
 
+		let mut remote_extension_id = None;
+
 		tx
 			.write_all(&Handshake { info_hash: metainfo.infohash(), peer_id: self_id!() }.to_bytes())
 			.await
@@ -338,13 +340,22 @@ fn spawn_peer(host: String, metainfo: MetaInfo) {
 			match data[0..=1] {
 				[20, 0] => {
 					let ext = ExtensionHandshake::from_bytes(&data[2..len]).unwrap();
-					if let Some(extension_id) = ext.m.ut_metadata {
+					remote_extension_id = ext.m.ut_metadata;
+					if let Some(extension_id) = remote_extension_id {
 						metainfo.got_size(ext.metadata_size.unwrap()).await;
 						if let Some(piece) = metainfo.which_piece().await {
-							tx.write_all(&MetadataMessage { msg_type: 0, piece }.to_bytes(extension_id)).await.unwrap();
+							tx
+								.write_all(&MetadataMessage { msg_type: 0, piece, total_size: None }.to_bytes(extension_id))
+								.await
+								.unwrap();
 						}
 					}
 				}
+
+				[20, 2] => {
+					metainfo.got_metadata_message(&data[2..len]).await;
+				}
+
 				_ => {
 					info!(
 						"read {} data bytes (type {}) from {}: {:?}",
