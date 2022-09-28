@@ -213,7 +213,7 @@ fn process_response(
 		)?;
 	}
 
-	BROADCAST.send(response)?;
+	let _ = BROADCAST.send(response);
 
 	Ok(())
 }
@@ -225,7 +225,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 		let mut packets_sent = 0;
 		let mut packets_recv = 0;
 		let mut our_ids = HashSet::new();
-		let mut peers = HashSet::new();
+		let mut peers = HashMap::new();
 
 		let info_hash: [u8; 20] =
 			hex::decode(&infohash)?.try_into().map_err(|_| "infohash not 20 hex bytes")?;
@@ -261,13 +261,22 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 			packets_sent += 1;
 		}
 
+		let tout = std::time::Duration::from_secs(1);
+		use tokio::time::timeout;
+
 		loop {
 			yield progress!(
 				"loading dht for infohash {infohash}; sent {packets_sent}, recv {packets_recv}, peers {}",
 				(peers.len())
 			);
 
-			let response = receiver.recv().await.unwrap();
+			let Ok(Ok(response)) = timeout(tout, receiver.recv()).await else {
+				println!("sent {packets_sent}, recv {packets_recv}");
+				let finished = peers.values().fold(0, |acc, peer:&tokio::task::JoinHandle<_>| acc + peer.is_finished() as usize);
+				println!("tcp started {}, finished {finished}", peers.len());
+				if finished == peers.len() { return; }
+				continue;
+			};
 
 			packets_recv += 1;
 
@@ -289,12 +298,12 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 				if let Some(values) = response.values {
 					for peer in values {
 						let host = peer.host();
-						if peers.insert(peer) {
+						peers.entry(host.clone()).or_insert_with(|| {
 							let metainfo = metainfo.clone();
 							tokio::spawn(async move {
 								run_peer(host, metainfo).await;
-							});
-						}
+							})
+						});
 					}
 				}
 			}
@@ -361,22 +370,26 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 							.write_all(&MetadataMessage { msg_type: 0, piece, total_size: None }.to_bytes(extension_id))
 							.await
 							.unwrap();
+					} else {
+						return;
 					}
 				}
 			}
 
 			[20, 2] => {
 				info!("got metadata message");
-				if !metainfo.got_metadata_message(&data[2..len]).await {
-					if let Some(piece) = metainfo.which_piece().await {
-						tx
-							.write_all(
-								&MetadataMessage { msg_type: 0, piece, total_size: None }
-									.to_bytes(remote_extension_id.unwrap()),
-							)
-							.await
-							.unwrap();
-					}
+				if metainfo.got_metadata_message(&data[2..len]).await {
+					return;
+				} else if let Some(piece) = metainfo.which_piece().await {
+					tx
+						.write_all(
+							&MetadataMessage { msg_type: 0, piece, total_size: None }
+								.to_bytes(remote_extension_id.unwrap()),
+						)
+						.await
+						.unwrap();
+				} else {
+					return;
 				};
 			}
 
