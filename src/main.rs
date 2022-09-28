@@ -1,7 +1,9 @@
 mod dht;
 
+use dht::Infohash;
 use futures::StreamExt;
 use log::*;
+use turbosql::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -18,7 +20,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	info!("dht launched");
 
 	tokio::spawn(async move {
-		let mut s = dht::get_peers("dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c");
+		let infohash = select!(Infohash "WHERE name IS NULL ORDER BY RANDOM() LIMIT 1").unwrap();
+		dbg!(hex::encode(infohash.infohash.unwrap()));
+		let mut s = dht::get_peers(hex::encode(infohash.infohash.unwrap()));
 
 		while let Some(_x) = s.next().await {
 			// dbg!(x).ok();

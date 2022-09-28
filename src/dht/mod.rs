@@ -72,9 +72,11 @@ struct Node {
 }
 
 #[derive(Turbosql, Default)]
-struct Infohash {
-	rowid: Option<i64>,
-	infohash: Option<[u8; 20]>,
+pub struct Infohash {
+	pub rowid: Option<i64>,
+	pub infohash: Option<[u8; 20]>,
+	pub name: Option<String>,
+	pub files: Option<String>,
 }
 
 static BROADCAST: Lazy<tokio::sync::broadcast::Sender<ResponseArgs>> =
@@ -238,7 +240,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 		let mut receiver = BROADCAST.subscribe();
 
 		for node in
-			select!(Vec<Node> "WHERE rowid IN (SELECT rowid FROM node ORDER BY RANDOM() LIMIT 20)")?
+			select!(Vec<Node> "WHERE rowid IN (SELECT rowid FROM node ORDER BY RANDOM() LIMIT 40)")?
 				.into_iter()
 		{
 			// let host = ;
@@ -304,6 +306,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 }
 
 async fn run_peer(host: String, metainfo: MetaInfo) {
+	dbg!(&host);
 	let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
 	let (rx, mut tx) = s.split();
 	let mut rx = tokio::io::BufReader::new(rx);
@@ -316,10 +319,11 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 		.unwrap();
 
 	let mut handshake = [0; 68];
-	rx.read_exact(&mut handshake).await.unwrap();
+	let Ok(_) = rx.read_exact(&mut handshake).await else { return };
 
 	loop {
-		let len = rx.read_u32().await.unwrap() as usize;
+		let Ok(len) = rx.read_u32().await else { return };
+		let len = len as usize;
 
 		if len == 0 {
 			info!("len 0 from {}", host);
@@ -344,6 +348,7 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 				let ext = ExtensionHandshake::from_bytes(&data[2..len]).unwrap();
 				remote_extension_id = ext.m.ut_metadata;
 				if let Some(extension_id) = remote_extension_id {
+					dbg!(&ext);
 					metainfo.got_size(ext.metadata_size.unwrap()).await;
 					if let Some(piece) = metainfo.which_piece().await {
 						tx
@@ -355,17 +360,28 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 			}
 
 			[20, 2] => {
-				metainfo.got_metadata_message(&data[2..len]).await;
+				info!("got metadata message");
+				if !metainfo.got_metadata_message(&data[2..len]).await {
+					if let Some(piece) = metainfo.which_piece().await {
+						tx
+							.write_all(
+								&MetadataMessage { msg_type: 0, piece, total_size: None }
+									.to_bytes(remote_extension_id.unwrap()),
+							)
+							.await
+							.unwrap();
+					}
+				};
 			}
 
 			_ => {
-				info!(
-					"read {} data bytes (type {}) from {}: {:?}",
-					n,
-					data[0],
-					host,
-					String::from_utf8_lossy(&data)
-				)
+				// info!(
+				// 	"read {} data bytes (type {}) from {}: {:?}",
+				// 	n,
+				// 	data[0],
+				// 	host,
+				// 	String::from_utf8_lossy(&data)
+				// )
 			}
 		}
 	}

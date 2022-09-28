@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::usize::MAX;
 use tokio::sync::Mutex;
+use turbosql::*;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct MetadataMessage {
@@ -86,7 +87,7 @@ impl MetaInfo {
 		Some(piece)
 	}
 
-	pub async fn got_metadata_message(&self, data: &[u8]) {
+	pub async fn got_metadata_message(&self, data: &[u8]) -> bool {
 		let msg = MetadataMessage::from_bytes(data).unwrap();
 		let mut guard = self.inner.lock().await;
 		let inner = guard.as_mut().unwrap();
@@ -96,10 +97,32 @@ impl MetaInfo {
 		inner.data[start..end].copy_from_slice(&data[(data.len() - (end - start))..data.len()]);
 		if self.verify(&inner.data) {
 			let dict = serde_bencode::de::from_bytes::<InfoDict>(&inner.data).unwrap();
-			dbg!(dict.name);
+			dbg!(&dict.name);
 			dbg!(dict.piece_length);
 			dbg!(dict.length);
-			dbg!(dict.files);
+			dbg!(&dict.files);
+
+			let files = dict.files.map(|f| serde_json::to_string(&f).unwrap());
+
+			// upsert_async!(
+			// 	Infohash {
+			// 		on self.infohash,
+			// 		dict.name,
+			// 		files
+			// 	}
+			// )
+			// .unwrap();
+
+			execute!(
+				"INSERT INTO infohash(infohash, name, files)"
+				"VALUES (" self.infohash, dict.name, files ")"
+				"ON CONFLICT(infohash) DO UPDATE SET name = " dict.name ", files = " files
+			)
+			.unwrap();
+
+			true
+		} else {
+			false
 		}
 	}
 
@@ -116,16 +139,16 @@ impl MetaInfo {
 
 #[derive(Debug, Deserialize)]
 pub struct InfoDict {
+	files: Option<Vec<File>>,
+	length: Option<usize>,
 	name: String,
 	#[serde(rename = "piece length")]
 	piece_length: usize,
 	#[serde(with = "serde_bytes")]
 	pieces: Vec<u8>,
-	length: Option<usize>,
-	files: Option<Vec<File>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct File {
 	length: usize,
 	path: Vec<String>,
