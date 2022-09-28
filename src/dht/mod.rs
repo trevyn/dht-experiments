@@ -4,6 +4,7 @@ turbomod::dir!(use "src/dht");
 
 use log::*;
 use once_cell::sync::{Lazy, OnceCell};
+use std::collections::{HashMap, HashSet};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
 	net::UdpSocket,
@@ -75,7 +76,9 @@ struct Node {
 pub struct Infohash {
 	pub rowid: Option<i64>,
 	pub infohash: Option<[u8; 20]>,
+	pub attempts: Option<i64>,
 	pub name: Option<String>,
+	pub length: Option<i64>,
 	pub files: Option<String>,
 }
 
@@ -221,8 +224,8 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	Box::pin(async_stream::try_stream! {
 		let mut packets_sent = 0;
 		let mut packets_recv = 0;
-		let mut our_ids = std::collections::HashSet::new();
-		let mut peers = std::collections::HashSet::new();
+		let mut our_ids = HashSet::new();
+		let mut peers = HashSet::new();
 
 		let info_hash: [u8; 20] =
 			hex::decode(&infohash)?.try_into().map_err(|_| "infohash not 20 hex bytes")?;
@@ -306,8 +309,11 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 }
 
 async fn run_peer(host: String, metainfo: MetaInfo) {
-	dbg!(&host);
-	let Ok(mut s) = tokio::net::TcpStream::connect(&host).await else { return };
+	let tout = std::time::Duration::from_secs(5);
+	use tokio::time::timeout;
+	info!("connecting {:?}", host);
+	let Ok(Ok(mut s)) = timeout(tout, tokio::net::TcpStream::connect(&host)).await else { info!("failed {:?}", host); return; };
+	info!("CONNECTED {:?}", host);
 	let (rx, mut tx) = s.split();
 	let mut rx = tokio::io::BufReader::new(rx);
 
@@ -319,7 +325,7 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 		.unwrap();
 
 	let mut handshake = [0; 68];
-	let Ok(_) = rx.read_exact(&mut handshake).await else { return };
+	let Ok(Ok(_)) = timeout(tout, rx.read_exact(&mut handshake)).await else { info!("handshake failed {:?}", host); return; };
 
 	loop {
 		let Ok(len) = rx.read_u32().await else { return };

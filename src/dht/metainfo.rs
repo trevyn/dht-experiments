@@ -99,7 +99,7 @@ impl MetaInfo {
 			let dict = serde_bencode::de::from_bytes::<InfoDict>(&inner.data).unwrap();
 			dbg!(&dict.name);
 			dbg!(dict.piece_length);
-			dbg!(dict.length);
+			dbg!(&dict.length);
 			dbg!(&dict.files);
 
 			let files = dict.files.map(|f| serde_json::to_string(&f).unwrap());
@@ -114,9 +114,12 @@ impl MetaInfo {
 			// .unwrap();
 
 			execute!(
-				"INSERT INTO infohash(infohash, name, files)"
-				"VALUES (" self.infohash, dict.name, files ")"
-				"ON CONFLICT(infohash) DO UPDATE SET name = " dict.name ", files = " files
+				"INSERT INTO infohash(infohash, name, length, files)"
+				"VALUES (" self.infohash, dict.name, dict.length, files ")"
+				"ON CONFLICT(infohash) DO UPDATE SET"
+					"name = " dict.name,
+					"length = " dict.length,
+					"files = " files
 			)
 			.unwrap();
 
@@ -140,7 +143,7 @@ impl MetaInfo {
 #[derive(Debug, Deserialize)]
 pub struct InfoDict {
 	files: Option<Vec<File>>,
-	length: Option<usize>,
+	length: Option<u64>,
 	name: String,
 	#[serde(rename = "piece length")]
 	piece_length: usize,
@@ -150,6 +153,6 @@ pub struct InfoDict {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct File {
-	length: usize,
+	length: u64,
 	path: Vec<String>,
 }
