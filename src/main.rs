@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	tokio::spawn(async move {
 		loop {
 			let infohash =
-				select!(Infohash "WHERE name IS NULL AND attempts is NULL ORDER BY RANDOM() LIMIT 1").unwrap();
+				select!(Infohash "WHERE name IS NULL ORDER BY attempts, RANDOM() LIMIT 1").unwrap();
 			execute!("UPDATE infohash SET attempts = CASE WHEN attempts IS NULL THEN 1 ELSE attempts + 1 END WHERE infohash = " infohash.infohash.unwrap()).unwrap();
 			dbg!(hex::encode(infohash.infohash.unwrap()));
 			let mut s = dht::get_peers(hex::encode(infohash.infohash.unwrap()));

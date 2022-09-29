@@ -185,14 +185,14 @@ pub async fn launch_dht(interface: Option<String>, port: u16) -> Result<(), trac
 			// 	String::from_utf8_lossy(&buf[..len])
 			// );
 
-			tokio::task::spawn_blocking(move || {
-				execute!(
-					"UPDATE node"
-					"SET last_response_ms = " now_ms()
-					"WHERE host = " addr.to_string()
-				)
-				.unwrap();
-			});
+			// tokio::task::spawn_blocking(move || {
+			// 	execute!(
+			// 		"UPDATE node"
+			// 		"SET last_response_ms = " now_ms()
+			// 		"WHERE host = " addr.to_string()
+			// 	)
+			// 	.unwrap();
+			// });
 
 			if let Ok(response) = Response::from_bytes(&buf[..len]) {
 				tokio::task::spawn_blocking(move || {
