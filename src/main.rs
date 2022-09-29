@@ -1,9 +1,18 @@
 mod dht;
 
+use clap::Parser;
 use dht::Infohash;
 use futures::StreamExt;
 use log::*;
+use std::process::exit;
 use turbosql::*;
+
+#[derive(Parser, Debug)]
+struct Args {
+	/// Harvest DHT data
+	#[arg(long, default_value_t = false)]
+	harvest: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,6 +21,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	}
 
 	pretty_env_logger::init_timed();
+
+	let args = Args::parse();
 
 	info!("start");
 
@@ -32,6 +43,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			}
 
 			info!("complete");
+
+			if !args.harvest {
+				exit(0);
+			}
 		}
 	});
 
