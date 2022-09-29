@@ -78,9 +78,6 @@ jobs:
 
       - run: echo "BUILD_ID=$(cat build_id/build_id)" >> $GITHUB_ENV
 
-      - run: |
-          mv ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/$(basename ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/*) $(basename ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/*)
-
       - id: create_release
         uses: trevyn/action-gh-release@v1
         env:
@@ -93,4 +90,4 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
-            dht-experiments
+            ubuntu-latest-nightly/dht-experiments
