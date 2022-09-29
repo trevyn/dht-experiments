@@ -35,6 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         rust: [beta, nightly] # we're using let-else in 1.65
 
     steps:
@@ -78,8 +79,6 @@ jobs:
       - run: echo "BUILD_ID=$(cat build_id/build_id)" >> $GITHUB_ENV
 
       - run: |
-          mv ubuntu-latest-nightly/Cargo.lock Cargo.lock
-          mv ubuntu-latest-nightly/package-lock.json package-lock.json
           mv ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/$(basename ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/*) $(basename ubuntu-latest-nightly/target/x86_64-unknown-linux-gnu/release/*)
 
       - id: create_release
