@@ -1,7 +1,7 @@
 mod dht;
 
 use clap::Parser;
-use dht::Infohash;
+use dht::{Infohash, Node};
 use futures::StreamExt;
 use log::*;
 use std::process::exit;
@@ -9,17 +9,21 @@ use turbosql::*;
 
 #[derive(Parser, Debug)]
 struct Args {
-	/// Harvest DHT data
+	/// Sample infohashes from DHT
+	#[arg(long, default_value_t = false)]
+	sample: bool,
+
+	/// Harvest metainfo files
 	#[arg(long, default_value_t = false)]
 	harvest: bool,
 
-	/// Interface to use for network connections
+	/// Interface to bind to for network connections
 	#[arg(short, long)]
 	interface: Option<String>,
 
 	/// Port to use for DHT
-	#[arg(short, long)]
-	port: Option<u16>,
+	#[arg(short, long, default_value_t = 55874)]
+	port: u16,
 }
 
 #[tokio::main]

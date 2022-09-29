@@ -64,12 +64,12 @@ struct SelfId {
 }
 
 #[derive(Turbosql, Default)]
-struct Node {
-	rowid: Option<i64>,
-	host: Option<String>,
-	id: Option<[u8; 20]>,
+pub struct Node {
+	pub rowid: Option<i64>,
+	pub host: Option<String>,
+	pub id: Option<[u8; 20]>,
 	// last_ping_attempt_ms: Option<i64>,
-	last_response_ms: Option<i64>,
+	pub last_response_ms: Option<i64>,
 }
 
 #[derive(Turbosql, Default)]
@@ -89,10 +89,7 @@ static INTERFACE: OnceCell<Option<String>> = OnceCell::new();
 static SELF_ID: OnceCell<[u8; 20]> = OnceCell::new();
 
 #[tracked::tracked]
-pub async fn launch_dht(
-	interface: Option<String>,
-	port: Option<u16>,
-) -> Result<(), tracked::StringError> {
+pub async fn launch_dht(interface: Option<String>, port: u16) -> Result<(), tracked::StringError> {
 	use std::net::{SocketAddr, ToSocketAddrs};
 	INTERFACE.set(interface).map_err(|_| "SOCK already set")?;
 
@@ -125,7 +122,7 @@ pub async fn launch_dht(
 		})
 		.map_err(|_| "SELF_ID already set")?;
 
-	let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", port.unwrap_or(55874))).await.unwrap();
+	let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).await.unwrap();
 
 	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
 	if let Some(Some(interface)) = INTERFACE.get() {
@@ -248,6 +245,20 @@ fn process_response(
 pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	let infohash = infohash.into();
 	Box::pin(async_stream::try_stream! {
+		let mut target = [0u8; 20];
+
+		for node in select!(Vec<Node> "ORDER by RANDOM() LIMIT 1000").unwrap().into_iter() {
+			let host = node.host.as_ref().unwrap();
+			rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
+
+			SOCK
+				.get()
+				.unwrap()
+				.send_to(&SampleInfohashesQuery { id: *SELF_ID.get().unwrap(), target }.into_bytes(), &host)
+				.await
+				.ok();
+		}
+
 		let mut packets_sent = 0;
 		let mut packets_recv = 0;
 		let mut our_ids = HashSet::new();
@@ -272,7 +283,6 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 			select!(Vec<Node> "WHERE rowid IN (SELECT rowid FROM node ORDER BY RANDOM() LIMIT 40)")?
 				.into_iter()
 		{
-			// let host = ;
 			our_ids.insert(node.id.unwrap());
 
 			SOCK
