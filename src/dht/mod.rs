@@ -82,7 +82,7 @@ pub struct Infohash {
 	pub files: Option<String>,
 }
 
-static BROADCAST: Lazy<tokio::sync::broadcast::Sender<ResponseArgs>> =
+static BROADCAST: Lazy<tokio::sync::broadcast::Sender<(String, ResponseArgs)>> =
 	Lazy::new(|| tokio::sync::broadcast::channel(200).0);
 static SOCK: OnceCell<tokio::net::UdpSocket> = OnceCell::new();
 static INTERFACE: OnceCell<Option<String>> = OnceCell::new();
@@ -230,13 +230,12 @@ fn process_response(
 	for node in response.nodes() {
 		let host = node.host();
 		execute!(
-			"INSERT INTO node(host, id)"
-			"VALUES (" host, node.id ")"
-			"ON CONFLICT(host) DO UPDATE SET id = " node.id
+			"INSERT OR IGNORE INTO node(host)"
+			"VALUES (" host ")"
 		)?;
 	}
 
-	let _ = BROADCAST.send(response);
+	let _ = BROADCAST.send((addr, response));
 
 	Ok(())
 }
@@ -247,7 +246,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	Box::pin(async_stream::try_stream! {
 		let mut target = [0u8; 20];
 
-		for node in select!(Vec<Node> "ORDER by RANDOM() LIMIT 1000").unwrap().into_iter() {
+		for node in select!(Vec<Node> "ORDER by RANDOM() LIMIT 100").unwrap().into_iter() {
 			let host = node.host.as_ref().unwrap();
 			rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
 
@@ -261,7 +260,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 
 		let mut packets_sent = 0;
 		let mut packets_recv = 0;
-		let mut our_ids = HashSet::new();
+		let mut our_hosts = HashSet::new();
 		let mut peers = HashMap::new();
 
 		let info_hash: [u8; 20] =
@@ -283,7 +282,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 			select!(Vec<Node> "WHERE rowid IN (SELECT rowid FROM node ORDER BY RANDOM() LIMIT 40)")?
 				.into_iter()
 		{
-			our_ids.insert(node.id.unwrap());
+			our_hosts.insert(node.host.clone().unwrap());
 
 			SOCK
 				.get()
@@ -306,7 +305,7 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 				(peers.len())
 			);
 
-			let Ok(Ok(response)) = timeout(tout, receiver.recv()).await else {
+			let Ok(Ok((addr, response))) = timeout(tout, receiver.recv()).await else {
 				println!("sent {packets_sent}, recv {packets_recv}");
 				let finished = peers.values().fold(0, |acc, peer:&tokio::task::JoinHandle<_>| acc + peer.is_finished() as usize);
 				println!("tcp started {}, finished {finished}", peers.len());
@@ -316,9 +315,9 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 
 			packets_recv += 1;
 
-			if our_ids.contains(&response.id()) {
+			if our_hosts.contains(&addr) {
 				for node in response.nodes() {
-					if our_ids.insert(node.id) {
+					if our_hosts.insert(node.host()) {
 						SOCK
 							.get()
 							.unwrap()
