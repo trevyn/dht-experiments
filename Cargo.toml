@@ -25,3 +25,9 @@ tokio = {version = "1", features = ["macros", "net", "rt-multi-thread"]}
 tracked = "0.5"
 turbomod = "0.1"
 turbosql = {git = "https://github.com/trevyn/turbosql"}
+# turbosql = {path = "../turbosql/turbosql"}
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 'z'
