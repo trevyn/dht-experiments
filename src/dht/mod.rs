@@ -98,7 +98,9 @@ pub async fn launch_dht(
 	let mut addrs_iter = "api.ipify.org:80".to_socket_addrs().unwrap();
 	let socket = TcpSocket::new_v4()?;
 	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
-	socket.bind_device(interface.map(|i| i.as_bytes()));
+	if let Some(interface) = interface {
+		socket.bind_device(interface.as_bytes());
+	}
 	#[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
 	if interface.is_some() {
 		error!("--interface only supported on Linux!");
