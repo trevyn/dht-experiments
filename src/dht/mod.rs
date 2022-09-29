@@ -84,9 +84,8 @@ pub struct Infohash {
 
 static BROADCAST: Lazy<tokio::sync::broadcast::Sender<ResponseArgs>> =
 	Lazy::new(|| tokio::sync::broadcast::channel(200).0);
-
 static SOCK: OnceCell<tokio::net::UdpSocket> = OnceCell::new();
-
+static INTERFACE: OnceCell<Option<String>> = OnceCell::new();
 static SELF_ID: OnceCell<[u8; 20]> = OnceCell::new();
 
 #[tracked::tracked]
@@ -95,14 +94,16 @@ pub async fn launch_dht(
 	port: Option<u16>,
 ) -> Result<(), tracked::StringError> {
 	use std::net::{SocketAddr, ToSocketAddrs};
+	INTERFACE.set(interface).map_err(|_| "SOCK already set")?;
+
 	let mut addrs_iter = "api.ipify.org:80".to_socket_addrs().unwrap();
 	let socket = TcpSocket::new_v4()?;
 	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
-	if let Some(interface) = interface {
-		socket.bind_device(Some(interface.as_bytes()));
+	if let Some(Some(interface)) = INTERFACE.get() {
+		socket.bind_device(Some(interface.as_bytes())).unwrap();
 	}
 	#[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
-	if interface.is_some() {
+	if INTERFACE.get().unwrap().is_some() {
 		error!("--interface only supported on Linux!");
 		std::process::exit(1);
 	}
@@ -112,8 +113,6 @@ pub async fn launch_dht(
 	stream.read_to_end(&mut buffer).await?;
 	let ip = String::from_utf8_lossy(&buffer).split('\n').last().unwrap().to_string();
 	info!("external ip is {:?}", ip);
-
-	std::process::exit(1);
 
 	SELF_ID
 		.set(match select!(Option<SelfId> "WHERE ip = " ip)? {
@@ -126,7 +125,14 @@ pub async fn launch_dht(
 		})
 		.map_err(|_| "SELF_ID already set")?;
 
-	SOCK.set(UdpSocket::bind("0.0.0.0:55874").await?).map_err(|_| "SOCK already set")?;
+	let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", port.unwrap_or(55874))).await.unwrap();
+
+	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+	if let Some(Some(interface)) = INTERFACE.get() {
+		udp_socket.bind_device(Some(interface.as_bytes())).unwrap();
+	}
+
+	SOCK.set(udp_socket).map_err(|_| "SOCK already set")?;
 
 	// let sock = std::sync::Arc::new();
 	// let sock_clone = sock.clone();
@@ -341,7 +347,12 @@ async fn run_peer(host: String, metainfo: MetaInfo) {
 	let tout = std::time::Duration::from_secs(5);
 	use tokio::time::timeout;
 	info!("connecting {:?}", host);
-	let Ok(Ok(mut s)) = timeout(tout, tokio::net::TcpStream::connect(&host)).await else { info!("failed {:?}", host); return; };
+	let socket = TcpSocket::new_v4().unwrap();
+	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+	if let Some(Some(interface)) = INTERFACE.get() {
+		socket.bind_device(Some(interface.as_bytes())).unwrap();
+	}
+	let Ok(Ok(mut s)) = timeout(tout, socket.connect(host.parse().unwrap())).await else { info!("failed {:?}", host); return; };
 	info!("CONNECTED {:?}", host);
 	let (rx, mut tx) = s.split();
 	let mut rx = tokio::io::BufReader::new(rx);
