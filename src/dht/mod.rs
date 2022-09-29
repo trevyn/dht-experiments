@@ -90,10 +90,21 @@ static SOCK: OnceCell<tokio::net::UdpSocket> = OnceCell::new();
 static SELF_ID: OnceCell<[u8; 20]> = OnceCell::new();
 
 #[tracked::tracked]
-pub async fn launch_dht() -> Result<(), tracked::StringError> {
-	let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
+pub async fn launch_dht(
+	localaddr: Option<String>,
+	port: Option<u16>,
+) -> Result<(), tracked::StringError> {
+	// let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
+
+	use std::net::{IpAddr, Ipv4Addr};
+	let addr: Ipv4Addr = localaddr.unwrap().parse().unwrap();
+	let client = reqwest::Client::builder().local_address(IpAddr::from(addr)).build().unwrap();
+	let request = client.get("https://api.ipify.org").build().unwrap();
+	let ip = client.execute(request).await?.text().await?;
 
 	info!("external ip is {:?}", ip);
+
+	std::process::exit(1);
 
 	SELF_ID
 		.set(match select!(Option<SelfId> "WHERE ip = " ip)? {

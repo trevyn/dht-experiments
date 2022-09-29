@@ -12,6 +12,14 @@ struct Args {
 	/// Harvest DHT data
 	#[arg(long, default_value_t = false)]
 	harvest: bool,
+
+	/// Local address to bind to
+	#[arg(short, long)]
+	localaddr: Option<String>,
+
+	/// Port to use for DHT
+	#[arg(short, long)]
+	port: Option<u16>,
 }
 
 #[tokio::main]
@@ -26,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	info!("start");
 
-	dht::launch_dht().await?;
+	dht::launch_dht(args.localaddr, args.port).await?;
 
 	info!("dht launched");
 
