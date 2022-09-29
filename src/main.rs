@@ -13,9 +13,9 @@ struct Args {
 	#[arg(long, default_value_t = false)]
 	harvest: bool,
 
-	/// Local address to bind to
+	/// Interface to use for network connections
 	#[arg(short, long)]
-	localaddr: Option<String>,
+	interface: Option<String>,
 
 	/// Port to use for DHT
 	#[arg(short, long)]
@@ -34,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	info!("start");
 
-	dht::launch_dht(args.localaddr, args.port).await?;
+	dht::launch_dht(args.interface, args.port).await?;
 
 	info!("dht launched");
 

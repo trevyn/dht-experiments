@@ -7,7 +7,7 @@ use once_cell::sync::{Lazy, OnceCell};
 use std::collections::{HashMap, HashSet};
 use tokio::{
 	io::{AsyncReadExt, AsyncWriteExt},
-	net::UdpSocket,
+	net::{TcpSocket, UdpSocket},
 };
 use turbosql::*;
 
@@ -91,17 +91,24 @@ static SELF_ID: OnceCell<[u8; 20]> = OnceCell::new();
 
 #[tracked::tracked]
 pub async fn launch_dht(
-	localaddr: Option<String>,
+	interface: Option<String>,
 	port: Option<u16>,
 ) -> Result<(), tracked::StringError> {
-	// let ip = reqwest::get("https://api.ipify.org").await?.text().await?;
-
-	use std::net::{IpAddr, Ipv4Addr};
-	let addr: Ipv4Addr = localaddr.unwrap().parse().unwrap();
-	let client = reqwest::Client::builder().local_address(IpAddr::from(addr)).build().unwrap();
-	let request = client.get("https://api.ipify.org").build().unwrap();
-	let ip = client.execute(request).await?.text().await?;
-
+	use std::net::{SocketAddr, ToSocketAddrs};
+	let mut addrs_iter = "api.ipify.org:80".to_socket_addrs().unwrap();
+	let socket = TcpSocket::new_v4()?;
+	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+	socket.bind_device(interface);
+	#[cfg(not(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
+	if interface.is_some() {
+		error!("--interface only supported on Linux!");
+		std::process::exit(1);
+	}
+	let mut stream = socket.connect(addrs_iter.next().unwrap()).await?;
+	stream.write_all("GET / HTTP/1.0\r\nHost: api.ipify.org\r\n\r\n".as_bytes()).await.unwrap();
+	let mut buffer = Vec::new();
+	stream.read_to_end(&mut buffer).await?;
+	let ip = String::from_utf8_lossy(&buffer).split('\n').last().unwrap().to_string();
 	info!("external ip is {:?}", ip);
 
 	std::process::exit(1);
