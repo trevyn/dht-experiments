@@ -225,15 +225,17 @@ fn process_response(
 				Infohash { infohash: Some(infohash.try_into().unwrap()), ..Default::default() }.insert()?;
 			}
 		}
+
+		return Ok(());
 	}
 
-	for node in response.nodes() {
-		let host = node.host();
-		execute!(
-			"INSERT OR IGNORE INTO node(host)"
-			"VALUES (" host ")"
-		)?;
-	}
+	// for node in response.nodes() {
+	// 	let host = node.host();
+	// 	execute!(
+	// 		"INSERT OR IGNORE INTO node(host)"
+	// 		"VALUES (" host ")"
+	// 	)?;
+	// }
 
 	let _ = BROADCAST.send((addr, response));
 
@@ -244,19 +246,7 @@ fn process_response(
 pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 	let infohash = infohash.into();
 	Box::pin(async_stream::try_stream! {
-		let mut target = [0u8; 20];
-
-		for node in select!(Vec<Node> "ORDER by RANDOM() LIMIT 100").unwrap().into_iter() {
-			let host = node.host.as_ref().unwrap();
-			rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
-
-			SOCK
-				.get()
-				.unwrap()
-				.send_to(&SampleInfohashesQuery { id: *SELF_ID.get().unwrap(), target }.into_bytes(), &host)
-				.await
-				.ok();
-		}
+		// let mut target = [0u8; 20];
 
 		let mut packets_sent = 0;
 		let mut packets_recv = 0;
@@ -267,6 +257,21 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 			hex::decode(&infohash)?.try_into().map_err(|_| "infohash not 20 hex bytes")?;
 
 		let metainfo = MetaInfo::new(info_hash);
+
+		for node in select!(Vec<Node> "ORDER by RANDOM() LIMIT 100").unwrap().into_iter() {
+			let host = node.host.as_ref().unwrap();
+			// rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut target);
+
+			SOCK
+				.get()
+				.unwrap()
+				.send_to(
+					&SampleInfohashesQuery { id: *SELF_ID.get().unwrap(), target: info_hash }.into_bytes(),
+					&host,
+				)
+				.await
+				.ok();
+		}
 
 		yield progress!("loading for infohash {infohash}");
 
@@ -315,34 +320,36 @@ pub fn get_peers(infohash: impl Into<String>) -> ProgressStream<String> {
 
 			packets_recv += 1;
 
-			if our_hosts.contains(&addr) {
-				for node in response.nodes() {
-					if our_hosts.insert(node.host()) {
-						SOCK
-							.get()
-							.unwrap()
-							.send_to(&GetPeersQuery { id: self_id!(), info_hash }.into_bytes(), &node.host())
-							.await
-							.map_err(|e| warn!("{:?} {:?}", e, node.host()))
-							.ok();
+			// println!("{:?}", addr);
 
-						packets_sent += 1;
-					}
+			// if our_hosts.contains(&addr) {
+			for node in response.nodes() {
+				if our_hosts.insert(node.host()) {
+					SOCK
+						.get()
+						.unwrap()
+						.send_to(&GetPeersQuery { id: self_id!(), info_hash }.into_bytes(), &node.host())
+						.await
+						.map_err(|e| warn!("{:?} {:?}", e, node.host()))
+						.ok();
+
+					packets_sent += 1;
 				}
+			}
 
-				if let Some(values) = response.values {
-					for peer in values {
-						let host = peer.host();
-						peers.entry(host.clone()).or_insert_with(|| {
-							let metainfo = metainfo.clone();
-							tokio::spawn(async move {
-								run_peer(host, metainfo).await;
-							})
-						});
-					}
+			if let Some(values) = response.values {
+				for peer in values {
+					let host = peer.host();
+					peers.entry(host.clone()).or_insert_with(|| {
+						let metainfo = metainfo.clone();
+						tokio::spawn(async move {
+							run_peer(host, metainfo).await;
+						})
+					});
 				}
 			}
 		}
+		// }
 
 		// yield complete! {
 		// 	status: "loading complete for infohash",
