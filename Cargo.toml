@@ -27,6 +27,9 @@ turbomod = "0.1"
 turbosql = {git = "https://github.com/trevyn/turbosql"}
 # turbosql = {path = "../turbosql/turbosql"}
 
+[profile.dev]
+incremental = false
+
 [profile.release]
 codegen-units = 1
 lto = true

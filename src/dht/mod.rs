@@ -105,7 +105,7 @@ pub async fn launch_dht(interface: Option<String>, port: u16) -> Result<(), trac
 		std::process::exit(1);
 	}
 	let mut stream = socket.connect(addrs_iter.next().unwrap()).await?;
-	stream.write_all("GET / HTTP/1.0\r\nHost: api.ipify.org\r\n\r\n".as_bytes()).await.unwrap();
+	stream.write_all("GET / HTTP/1.0\r\nHost: api64.ipify.org\r\n\r\n".as_bytes()).await.unwrap();
 	let mut buffer = Vec::new();
 	stream.read_to_end(&mut buffer).await?;
 	let ip = String::from_utf8_lossy(&buffer).split('\n').last().unwrap().to_string();

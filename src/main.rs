@@ -5,6 +5,7 @@ use dht::{Infohash, Node};
 use futures::StreamExt;
 use log::*;
 use std::process::exit;
+use std::sync::Mutex;
 use turbosql::*;
 
 #[derive(Parser, Debug)]
@@ -25,6 +26,8 @@ struct Args {
 	#[arg(short, long, default_value_t = 55874)]
 	port: u16,
 }
+
+static STATUS: Mutex<String> = Mutex::new(String::new());
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -50,8 +53,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			dbg!(hex::encode(infohash.infohash.unwrap()));
 			let mut s = dht::get_peers(hex::encode(infohash.infohash.unwrap()));
 
-			while let Some(_x) = s.next().await {
-				// dbg!(x).ok();
+			while let Some(status) = s.next().await {
+				if let Ok(dht::Progress::Progress { status }) = status {
+					*STATUS.lock().unwrap() = status;
+				}
 			}
 
 			info!("complete");
@@ -63,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	});
 
 	let native_options = eframe::NativeOptions::default();
-	eframe::run_native("My egui App", native_options, Box::new(|cc| Box::new(MyEguiApp::new(cc))));
+	eframe::run_native("dht-experiments", native_options, Box::new(|cc| Box::new(MyEguiApp::new(cc))));
 
 	info!("sleeping!");
 
@@ -91,6 +96,8 @@ impl eframe::App for MyEguiApp {
 	fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
 		egui::CentralPanel::default().show(ctx, |ui| {
 			ui.heading("Hello World!");
+			ui.heading(STATUS.lock().unwrap().as_str());
 		});
+		ctx.request_repaint();
 	}
 }
