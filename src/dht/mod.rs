@@ -93,7 +93,7 @@ pub async fn launch_dht(interface: Option<String>, port: u16) -> Result<(), trac
 	use std::net::{SocketAddr, ToSocketAddrs};
 	INTERFACE.set(interface).map_err(|_| "SOCK already set")?;
 
-	let mut addrs_iter = "api.ipify.org:80".to_socket_addrs().unwrap();
+	let mut addrs_iter = "api64.ipify.org:80".to_socket_addrs().unwrap();
 	let socket = TcpSocket::new_v4()?;
 	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
 	if let Some(Some(interface)) = INTERFACE.get() {
