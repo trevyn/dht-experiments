@@ -1,4 +1,4 @@
-#![allow(unused_macros, dead_code, clippy::duplicate_mod, unused_imports)]
+#![allow(unused_macros, dead_code, clippy::duplicate_mod, unused_imports, unused_variables)]
 
 turbomod::dir!(use "src/dht");
 
@@ -122,7 +122,7 @@ pub async fn launch_dht(interface: Option<String>, port: u16) -> Result<(), trac
 		})
 		.map_err(|_| "SELF_ID already set")?;
 
-	let udp_socket = UdpSocket::bind(format!("0.0.0.0:{}", port)).await.unwrap();
+	let udp_socket = UdpSocket::bind(format!("0.0.0.0:{port}")).await.unwrap();
 
 	#[cfg(all(any(target_os = "android", target_os = "fuchsia", target_os = "linux")))]
 	if let Some(Some(interface)) = INTERFACE.get() {

@@ -16,7 +16,7 @@ where
 {
 	let slice: &[u8] = serde_bytes::deserialize(deserializer)?;
 	let array: [u8; N] = slice.try_into().map_err(|_| {
-		let expected = format!("[u8; {}]", N);
+		let expected = format!("[u8; {N}]");
 		D::Error::invalid_length(slice.len(), &expected.as_str())
 	})?;
 	Ok(array)
