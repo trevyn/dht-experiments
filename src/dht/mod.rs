@@ -212,19 +212,19 @@ fn process_response(
 	response: ResponseArgs,
 ) -> Result<(), Box<dyn std::error::Error>> {
 	if let ResponseArgs { num, interval, samples: Some(Bytes::Bytes(ref samples)), .. } = response {
-		println!(
-			"got {} bytes of samples, total {:?}, interval {:?} from {:?}",
-			samples.len(),
-			num,
-			interval,
-			addr
-		);
+		// println!(
+		// 	"got {} bytes of samples, total {:?}, interval {:?} from {:?}",
+		// 	samples.len(),
+		// 	num,
+		// 	interval,
+		// 	addr
+		// );
 
+		execute!("BEGIN TRANSACTION")?;
 		for infohash in samples.chunks_exact(20) {
-			if select!(Option<Infohash> "WHERE infohash = " infohash)?.is_none() {
-				Infohash { infohash: Some(infohash.try_into().unwrap()), ..Default::default() }.insert()?;
-			}
+			execute!("INSERT OR IGNORE INTO infohash(infohash) VALUES (" infohash ")")?;
 		}
+		execute!("COMMIT")?;
 
 		return Ok(());
 	}
