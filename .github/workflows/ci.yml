@@ -77,10 +77,6 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
 
-      - run: cat build_id/build_id
-
-      - run: echo "BUILD_ID=$(cat build_id/build_id)" >> $GITHUB_ENV
-
-      - run: gh release create ${{ env.BUILD_ID }} --target ${{ github.sha }} --generate-notes ubuntu-latest-nightly/dht-experiments
+      - run: gh release create $(cat build_id/build_id) --target ${{ github.sha }} --generate-notes ubuntu-latest-nightly/dht-experiments
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
