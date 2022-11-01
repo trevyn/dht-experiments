@@ -80,16 +80,6 @@ jobs:
 
       - run: echo "BUILD_ID=$(cat build_id/build_id)" >> $GITHUB_ENV
 
-      - id: create_release
-        uses: trevyn/action-gh-release@v1
+      - run: gh release create ${{ env.BUILD_ID }} --target ${{ github.sha }} --generate-notes ubuntu-latest-nightly/dht-experiments
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.BUILD_ID }}
-          target_commitish: ${{ github.sha }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            ubuntu-latest-nightly/dht-experiments
