@@ -41,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - run: rustup default ${{ matrix.rust }} && rustup update
+      - run: rustup default ${{ matrix.rust }} && rustup update ${{ matrix.rust }}
 
       - run: cargo fetch
 
