@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		std::env::set_var("RUST_LOG", "info")
 	}
 
-	pretty_env_logger::init_timed();
+	tracing_subscriber::fmt::init();
 
 	let args = Args::parse();
 
